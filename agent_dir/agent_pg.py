@@ -66,7 +66,8 @@ class Agent_PG(Agent):
         if args.test_pg:
             self.model = load_model(args.test_pg_model_path)
         else:    
-            self.learning_rate  = args.learning_rate
+            #self.learning_rate  = args.learning_rate
+            self.learning_rate = 0.000001
             # Model for Breakout #
             model = Sequential()
             model.add(Conv2D(32,kernel_size=(9, 9),strides=4,activation='relu',input_shape=(80,80,1), init='he_uniform'))
@@ -96,6 +97,8 @@ class Agent_PG(Agent):
         observation = self.env.reset()        
         # Training progress
         while True:
+            self.env.env.render()
+
             # Get observe
             cur_x = prepro(observation)
             # Consider frame difference and take action.
@@ -111,7 +114,7 @@ class Agent_PG(Agent):
 
             reward_sum += reward
             drs.append(reward) 
-            dlogps.append(np.array(y).astype('float32') - aprob)
+            dlogps.append(np.array(y).astype('float32') - aprob)#算出实际操作和输出操作的差值，即"梯度"
 
             if done:
                 ep_number +=1
@@ -122,13 +125,14 @@ class Agent_PG(Agent):
                 discounted_ep_reward = discount_rewards(ep_reward)
                 discounted_ep_reward -= np.mean(discounted_ep_reward)
                 discounted_ep_reward /= np.std(discounted_ep_reward)
-                ep_dlogp *= discounted_ep_reward
+                ep_dlogp *= discounted_ep_reward   #梯度根据奖励进行缩放，大奖励代表大的修正,负奖励代表反向操作。"梯度"所有维度的和为0
 
                 # Store current episode into training batch
                 tr_x.append(ep_x)
                 tr_y.append(ep_dlogp)
                 frames, dlogps, drs =[], [], []
                 if ep_number % batch_size == 0:
+                    # 根据输出操作和"梯度"得到target，在categorical_crossentropy中计算loss
                     input_tr_y = prob_actions + self.learning_rate * np.squeeze(np.vstack(tr_y))
                     self.model.train_on_batch(np.vstack(tr_x).reshape(-1,80,80,1), input_tr_y)
                     tr_x,tr_y,prob_actions = [],[],[]

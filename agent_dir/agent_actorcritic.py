@@ -48,6 +48,13 @@ class Agent_ActorCritic(Agent):
 
         self.dummy_act_picked = np.zeros((1,self.actions_avialbe))
 
+        self.actor = self.buildActor()
+
+        self.critic = self.buildCritic()
+
+
+
+    def buildActor(self):
         # Actor
         input_frame  = Input(shape=(self.feature_dim,))
         act_picked = Input(shape=(self.actions_avialbe,))
@@ -55,14 +62,26 @@ class Agent_ActorCritic(Agent):
 
         act_prob = Dense(self.actions_avialbe,activation='softmax')(hidden_f)
         selected_act_prob = Multiply()([act_prob,act_picked])
-        selected_act_prob = Lambda(lambda x:K.sum(x, axis=-1, keepdims=True),output_shape=(1,))(selected_act_prob)
 
+        #output_shape参数可以省略
+        #Lambda可以看作一个Layer，以下代码可以看作把输入的最后一维求和，并保持维数
+        selected_act_prob = Lambda(lambda x:K.sum(x, axis=-1, keepdims=True),output_shape=(1,))(selected_act_prob)
+        #selected_act_prob = Lambda(lambda x: K.sum(x, axis=-1, keepdims=True))(selected_act_prob)
+
+        #输出act_prob是在策略sample的时候要用到，selected_act_prob是在train的时候要用到，这个才是真正的误差
         model = Model(inputs=[input_frame,act_picked], outputs=[act_prob, selected_act_prob])
+        #model = Model(inputs=[input_frame, act_picked], outputs=[selected_act_prob])
 
         opt = Adam(lr=self.actor_learning_rate)
+        #loss_weights是2个输出的loss的组合权重，模型训练目标是一个总的loss
+        #categorical_crossentropy是自定义的loss函数，参数不用是one_hot,与系统定义的"categorical_crossentropy"有差别
+        #actor的loss函数的形式为-Adv*log(selected_act_prob),与交叉熵的形式有点像，但是Adv和selected_act_prob都不用是分布
         model.compile(loss=['mse',categorical_crossentropy], loss_weights=[0.0,1.0],optimizer=opt)
-        self.actor = model
+        #model.compile(loss=['mse', "categorical_crossentropy"], loss_weights=[0.0, 1.0], optimizer=opt)
+        #model.compile(loss=[categorical_crossentropy], loss_weights=[1.0], optimizer=opt)
+        return model
 
+    def buildCritic(self):
         # Critic
         model = Sequential()
         model.add(Dense(20,activation='relu',input_shape=(self.feature_dim,)))
@@ -70,7 +89,7 @@ class Agent_ActorCritic(Agent):
 
         opt = Adam(lr=self.critic_learning_rate)
         model.compile(loss='mse', optimizer=opt)
-        self.critic = model
+        return model
 
     def init_game_setting(self):
         self.prev_x = None
@@ -92,8 +111,15 @@ class Agent_ActorCritic(Agent):
         observation = self.env.reset()
         # Training progress
         while True:
-            act = np.random.choice(np.arange(self.actions_avialbe), 
-                    p=self.actor.predict([np.expand_dims(observation,axis=0),self.dummy_act_picked])[0].flatten())
+            self.env.env.render()
+
+            ax = np.arange(self.actions_avialbe)
+            #一张图片就是一个batch，所以需要扩展出一个表示图片数量的batch维度，这个维度的shape值为1
+            cc = np.expand_dims(observation,axis=0)
+            dd = self.actor.predict([cc, self.dummy_act_picked])
+            px = dd[0].flatten()
+
+            act = np.random.choice(a=ax, p=px)
 
             act_one_hot = np.zeros((1,self.actions_avialbe))
             act_one_hot[0,act]=1.0
